@@ -2,7 +2,7 @@ import os
 import sys
 import subprocess
 
-# Проверка и установка Pillow
+# Pillow — установка, если нужно
 try:
     from PIL import Image, ImageTk
 except ImportError:
@@ -11,51 +11,89 @@ except ImportError:
 
 import tkinter as tk
 
-CAR_SCALE = 0.5  # Маштаб машины относительно стороны окна
+CAR_SCALE = 0.5  # масштаб машины по ширине окна
 
 class CarOnBackgroundApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Car on Road")
 
-        self.canvas = tk.Canvas(root, highlightthickness=0)
-        self.canvas.pack(fill=tk.BOTH, expand=True)
-
+        # Загружаем изображения
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.bg_image = Image.open(os.path.join(script_dir, "Background.png"))
         self.car_image = Image.open(os.path.join(script_dir, "car.png"))
 
-        self._last_size = None
-        self._pending_resize = False
+        # Холст
+        self.canvas = tk.Canvas(root, highlightthickness=0, bg="black")
+        self.canvas.pack(fill=tk.BOTH, expand=True)
 
+        # Состояния
+        self._last_w = None
+        self._last_h = None
+        self._pending_geometry = False
+        self._resize_after_id = None  # таймер для отложенной обработки
+
+        # Подписка на изменение
         self.root.bind("<Configure>", self.on_configure)
 
+        # Первая отрисовка
+        self.root.after(0, self.initial_draw)
+
+    def initial_draw(self):
+        w = self.root.winfo_width()
+        h = self.root.winfo_height()
+        side = min(w, h)
+        self._last_w = w
+        self._last_h = h
+        self.set_square_geometry(side)
+
+    def set_square_geometry(self, side):
+        self._pending_geometry = True
+        self.root.geometry(f"{side}x{side}")
+
     def on_configure(self, event):
-        # Запускаем только один resize после отпускания мыши
-        if not self._pending_resize:
-            self._pending_resize = True
-            self.root.after_idle(self.enforce_square)
-
-    def enforce_square(self):
-        self._pending_resize = False
-
-        width = self.root.winfo_width()
-        height = self.root.winfo_height()
-
-        if width == height:
-            size = width
-        else:
-            size = min(width, height)
-            self.root.geometry(f"{size}x{size}")
-            return  # Ждём следующего Configure после выравнивания
-
-        if size == self._last_size:
+        if self._pending_geometry:
+            self._pending_geometry = False
             return
-        self._last_size = size
 
+        # Отложенный вызов, чтобы дождаться завершения изменения размера
+        if self._resize_after_id is not None:
+            self.root.after_cancel(self._resize_after_id)
+
+        self._resize_after_id = self.root.after(300, self.on_resize_complete)
+
+    def on_resize_complete(self):
+        self._resize_after_id = None
+
+        w = self.root.winfo_width()
+        h = self.root.winfo_height()
+
+        if self.root.state() == "zoomed":
+            self.root.state("normal")
+            self.set_square_geometry(min(w, h))
+            return
+
+        if self._last_w is not None and self._last_h is not None:
+            dw = abs(w - self._last_w)
+            dh = abs(h - self._last_h)
+
+            if dw > dh:
+                self.set_square_geometry(w)
+                return
+            elif dh > dw:
+                self.set_square_geometry(h)
+                return
+
+        self._last_w = w
+        self._last_h = h
+
+        size = min(w, h)
         self.redraw(size)
 
     def redraw(self, size):
+        if size < 100:
+            return
+
         self.canvas.config(width=size, height=size)
         self.canvas.delete("all")
 
